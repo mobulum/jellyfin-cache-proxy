@@ -1,0 +1,10 @@
+[Unit]
+Description=Jellyfin DLNA & REST Cache Pre-warm Timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=4h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

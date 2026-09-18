@@ -1,0 +1,12 @@
+[Unit]
+Description=Jellyfin DLNA & REST Cache Pre-warm
+After=nginx.service jellyfin.service
+Wants=nginx.service jellyfin.service
+
+[Service]
+Type=oneshot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /usr/local/bin/jellyfin-cache-prewarm.py
+User=root
+StandardOutput=journal
+StandardError=journal
