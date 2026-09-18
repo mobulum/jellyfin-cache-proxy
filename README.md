@@ -70,7 +70,7 @@ flowchart LR
     Feishin -->|REST API| Nginx
     Web -->|UI / WebSockets| Nginx
     Nginx <--> Cache
-    Nginx -->|Proxy Pass (Origin)| Jellyfin
+    Nginx -->|Proxy Pass| Jellyfin
 ```
 
 - **Frontend Nginx**: Listens on `:80` and `:8096`.
