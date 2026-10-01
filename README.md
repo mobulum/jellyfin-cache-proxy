@@ -144,7 +144,8 @@ sudo systemctl restart jellyfin
 The pre-warm script iterates over:
 1. **DLNA Root** (`ObjectID: 0`) and **Playlists folder**.
 2. **DLNA pagination chunks** (`RequestedCount: 10, 100, 500`) to guarantee that mobile UPnP apps (like WiiM Home) immediately hit the cache when opening playlists.
-3. **REST API Playlists** for all users:
+3. **REST API Playlists & Folders** for all users:
+   - Playlists folder view & metadata (`/Users/{uid}/Items?ParentId={playlists_folder_id}&StartIndex=0&Limit=100...` used by Web and Smart TVs like LG webOS)
    - Feishin items & metadata endpoints
    - Finamp items endpoint
    - Jellyfin Web client items endpoint (`/Users/{uid}/Items?ParentId=...&Limit=300`)

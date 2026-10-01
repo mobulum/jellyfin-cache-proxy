@@ -158,6 +158,28 @@ def prewarm_rest():
         except Exception:
             continue
 
+        # Pre-warm user's Playlists folder view (used by Smart TVs, Web, and mobile apps when clicking 'Playlists')
+        views_url = f"{ORIGIN_BASE}/Users/{uid}/Views"
+        v_code, _, _, v_data = http_get(views_url, headers={"Authorization": AUTH_HEADER}, timeout=30)
+        if v_code == 200:
+            try:
+                user_views = json.loads(v_data.decode("utf-8")).get("Items", [])
+                for v in user_views:
+                    if v.get("CollectionType") == "playlists":
+                        view_id = v.get("Id")
+                        # 1. Folder metadata
+                        http_get(f"{CACHE_BASE}/Users/{uid}/Items/{view_id}", headers={"Authorization": AUTH_HEADER, "X-Warmup": "1"})
+                        # 2. Folder listing contents (standard Jellyfin Web/TV query)
+                        folder_list_url = (
+                            f"{CACHE_BASE}/Users/{uid}/Items?StartIndex=0&Limit=100"
+                            f"&Fields=PrimaryImageAspectRatio%2CSortName%2CPath%2CChildCount%2CMediaSourceCount%2CPrimaryImageAspectRatio"
+                            f"&ImageTypeLimit=1&ParentId={view_id}&SortBy=IsFolder%2CSortName&SortOrder=Ascending"
+                        )
+                        c_fl, st_fl, t_fl, _ = http_get(folder_list_url, headers={"Authorization": AUTH_HEADER, "X-Warmup": "1"})
+                        print(f"    [Playlists folder list: {st_fl}] HTTP {c_fl} in {t_fl:.2f}s")
+            except Exception as e:
+                print(f"    [WARN] Failed to prewarm playlists folder view: {e}", file=sys.stderr)
+
         for item in pl_items:
             pid = item.get("Id")
             pname = item.get("Name")
