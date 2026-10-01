@@ -3,7 +3,7 @@
 Jellyfin Cache Pre-warm Script
 Iterates through DLNA root, playlist folders, and REST API playlists to warm up
 the Nginx proxy cache. Ensures snappy response times (<10ms instead of 30-180s)
-for massive music libraries.
+for massive music libraries across UPnP players (WiiM), Feishin, Finamp, and Jellyfin Web.
 """
 
 import urllib.request
@@ -127,7 +127,7 @@ def prewarm_dlna():
 
 
 def prewarm_rest():
-    print("=== [2/2] Starting REST API Pre-warming (Feishin / Finamp) ===")
+    print("=== [2/2] Starting REST API Pre-warming (Feishin / Finamp / Web) ===")
 
     users_url = f"{ORIGIN_BASE}/Users"
     code, _, el, data = http_get(users_url, headers={"Authorization": AUTH_HEADER}, timeout=30)
@@ -183,6 +183,15 @@ def prewarm_rest():
             url_3 = f"{CACHE_BASE}/Items?UserId={uid}&IncludeItemTypes=Audio&ParentId={pid}"
             c3, st3, t3, _ = http_get(url_3, headers={"Authorization": AUTH_HEADER, "X-Warmup": "1"})
             print(f"      [Finamp items: {st3}] HTTP {c3} in {t3:.2f}s")
+
+            # 4) Jellyfin Web client items endpoint (top 300 tracks)
+            url_4 = (
+                f"{CACHE_BASE}/Users/{uid}/Items?ParentId={pid}&Limit=300"
+                f"&Fields=Chapters%2CTrickplay&ExcludeLocationTypes=Virtual"
+                f"&EnableTotalRecordCount=false&CollapseBoxSetItems=false"
+            )
+            c4, st4, t4, _ = http_get(url_4, headers={"Authorization": AUTH_HEADER, "X-Warmup": "1"})
+            print(f"      [Web items (300): {st4}] HTTP {c4} in {t4:.2f}s")
 
 
 def main():

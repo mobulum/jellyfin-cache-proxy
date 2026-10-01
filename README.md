@@ -11,17 +11,18 @@ High-performance Nginx caching reverse proxy and automated pre-warming suite spe
 ## 🎯 The Problems This Solves
 
 ### 1. The "Massive Playlist" Bottleneck
-When requesting large playlists (e.g. 4,000–6,000 songs) in Jellyfin, the server must query the database, parse tracks, format metadata, and serialize response payloads up to 10MB in size.
+When requesting large playlists (e.g. 4,000–6,000 songs) in Jellyfin, the server must query the SQLite database, resolve linked tracks, format metadata, and serialize response payloads up to 10MB in size.
 - **Without Cache**: Takes **30 to 180 seconds** per request.
 - **Client Impact**:
   - **Cloudflare**: Drops connections after 100s with `HTTP 524 Gateway Timeout`.
   - **Feishin / Finamp**: Shows spinning wheel, infinite loaders, or crashes.
+  - **Jellyfin Web**: Stalls for tens of seconds when browsing playlist views.
   - **UPnP / DLNA Streamers**: Network timeouts (`HTTP 504`), socket disconnections, or empty playlist views.
 - **With Cache**: Cached responses are served in **under 10ms**, eliminating server load completely.
 
 ### 2. The DLNA / UPnP SOAP Caching Challenge
 DLNA `ContentDirectory` browse requests use HTTP **`POST`** with XML/SOAP envelopes (`SOAPACTION: "urn:schemas-upnp-org:service:ContentDirectory:1#Browse"`).
-- By default, HTTP caches (including Nginx) only cache `GET` and `HEAD` requests.
+- By default, HTTP caches (including standard Nginx setups) only cache `GET` and `HEAD` requests.
 - Nginx here is uniquely configured to cache `POST` requests keyed by `SOAP|$uri|$http_soapaction|$request_body`.
 
 ### 3. Loopback & Host IP Poisoning in DLNA
@@ -35,17 +36,30 @@ When Nginx serves a cached `200 OK` response directly from disk, Jellyfin's upst
 - Web apps and desktop clients (Feishin) reject the response due to browser CORS policies.
 - **Solution**: Nginx strips upstream CORS headers and injects uniform CORS headers for all responses.
 
+### 5. Missing Tracks in Playlists on Case-Insensitive Filesystems (exFAT / NTFS / SMB)
+If your music library is mounted from an exFAT, NTFS, or SMB drive, filesystem path matching is case-insensitive on disk. However, Jellyfin's SQLite database performs **exact case-sensitive matching** against paths in its `BaseItems` table.
+- When an M3U playlist contains track paths with casing discrepancies (e.g. `Lossless` vs `LOSSLESS`, `Various Artists` vs `Various artists`, `.flac` vs `.FLAC`), Jellyfin fails to match them:
+  ```text
+  [WRN] Unable to find linked item at path "/mnt/user/music/..."
+  ```
+- The song silently disappears from the playlist in Jellyfin and all connected players (WiiM, Feishin, Web).
+- **Solution**: Use [`tools/fix-m3u-case.py`](tools/fix-m3u-case.py) to automatically synchronize M3U playlist file paths with the canonical database casing stored in Jellyfin's `jellyfin.db`.
+
 ---
 
 ## 📁 Repository Structure
 
 ```
 .
-├── nginx-jellyfin-cache.conf       # Nginx site configuration
-├── jellyfin-cache-prewarm.py       # Python script for DLNA & REST pre-warming
+├── nginx-jellyfin-cache.conf       # Nginx site configuration (REST & SOAP cache)
+├── jellyfin-cache-prewarm.py       # Python script for DLNA, REST & Web UI pre-warming
+├── jellyfin-proxy-ssdp.py          # Standalone SSDP advertiser for port 8096 proxy
+├── tools/
+│   └── fix-m3u-case.py             # Fixes playlist path casing against jellyfin.db
 └── systemd/
-    ├── jellyfin-cache-prewarm.service   # Systemd oneshot service
-    └── jellyfin-cache-prewarm.timer     # Systemd timer (runs every 4 hours)
+    ├── jellyfin-cache-prewarm.service   # Systemd oneshot warmup service
+    ├── jellyfin-cache-prewarm.timer     # Systemd timer (runs every 4 hours)
+    └── jellyfin-proxy-ssdp.service      # Systemd service for SSDP advertiser
 ```
 
 ---
@@ -61,6 +75,7 @@ flowchart LR
     end
 
     subgraph Server["Jellyfin Host"]
+        SSDP["SSDP Advertiser (:1900 UDP)"]
         Nginx["Nginx Cache Proxy (:80 / :8096)"]
         Cache[("/var/cache/nginx/jellyfin")]
         Jellyfin["Jellyfin Backend (:8095)"]
@@ -69,6 +84,7 @@ flowchart LR
     WiiM -->|Browse / Stream| Nginx
     Feishin -->|REST API| Nginx
     Web -->|UI / WebSockets| Nginx
+    SSDP -.->|Advertises :8096| WiiM
     Nginx <--> Cache
     Nginx -->|Proxy Pass| Jellyfin
 ```
@@ -76,12 +92,13 @@ flowchart LR
 - **Frontend Nginx**: Listens on `:80` and `:8096`.
 - **Jellyfin Origin**: Rebound to `:8095` (localhost only).
 - **Endpoints Cached**:
-  - `/playlists/{id}/items`
-  - `/users/{uid}/items/{id}`
-  - `/items?ParentId=...`
-  - `/users/{uid}/items?ParentId=...`
+  - `/playlists/{id}/items` (Feishin)
+  - `/users/{uid}/items/{id}` (Feishin metadata)
+  - `/items?ParentId=...` (Finamp)
+  - `/users/{uid}/items?ParentId=...` (Jellyfin Web & generic clients)
   - `/artists`, `/artists/albumartists`, `/musicgenres`
   - `/dlna/{id}/contentdirectory/control` (SOAP Browse)
+  - `/jellyfin-proxy/description.xml` (Custom UPnP device description)
 
 ---
 
@@ -127,7 +144,10 @@ sudo systemctl restart jellyfin
 The pre-warm script iterates over:
 1. **DLNA Root** (`ObjectID: 0`) and **Playlists folder**.
 2. **DLNA pagination chunks** (`RequestedCount: 10, 100, 500`) to guarantee that mobile UPnP apps (like WiiM Home) immediately hit the cache when opening playlists.
-3. **REST API Playlists** for all users (Feishin and Finamp endpoints).
+3. **REST API Playlists** for all users:
+   - Feishin items & metadata endpoints
+   - Finamp items endpoint
+   - Jellyfin Web client items endpoint (`/Users/{uid}/Items?ParentId=...&Limit=300`)
 
 1. Copy the script to `/usr/local/bin`:
    ```bash
@@ -136,11 +156,10 @@ The pre-warm script iterates over:
    ```
 2. Generate an API Key in Jellyfin:
    - Dashboard -> **Administration** -> **API Keys** -> Create new key (e.g. `CachePrewarm`).
-3. Set your configuration inside `/usr/local/bin/jellyfin-cache-prewarm.py` or via environment variables:
+3. Set your configuration inside `/usr/local/bin/jellyfin-cache-prewarm.py` or via environment variables (`JELLYFIN_API_TOKEN`):
    ```python
    API_TOKEN = "your_jellyfin_api_key_here"
    ```
-
 4. Test run the script manually:
    ```bash
    sudo /usr/local/bin/jellyfin-cache-prewarm.py
@@ -163,6 +182,13 @@ To keep the cache continuously fresh without manual intervention:
    ```bash
    systemctl list-timers | grep jellyfin
    ```
+
+### Step 5: (Optional) Fixing Playlist Case-Sensitivity Mismatches
+If songs are missing from your M3U playlists in Jellyfin due to exFAT/Samba case differences:
+```bash
+python3 tools/fix-m3u-case.py /path/to/playlist.m3u /var/lib/jellyfin/data/jellyfin.db
+```
+The script will match each track path case-insensitively against Jellyfin's database, create a backup copy (`.casefix_bak`), and rewrite the playlist with the exact canonical casing.
 
 ---
 
