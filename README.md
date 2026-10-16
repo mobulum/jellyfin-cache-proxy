@@ -187,7 +187,11 @@ To keep the cache continuously fresh without manual intervention:
 ### Step 5: (Optional) Fixing Playlist Case-Sensitivity Mismatches
 If songs are missing from your M3U playlists in Jellyfin due to exFAT/Samba case differences:
 ```bash
+# Fix a single playlist:
 python3 tools/fix-m3u-case.py /path/to/playlist.m3u /var/lib/jellyfin/data/jellyfin.db
+
+# Or batch-fix an entire directory of playlists:
+python3 tools/fix-m3u-case.py /mnt/user/music/LOSSLESS/playlists /var/lib/jellyfin/data/jellyfin.db
 ```
 The script will match each track path case-insensitively against Jellyfin's database, create a backup copy (`.casefix_bak`), and rewrite the playlist with the exact canonical casing.
 

@@ -191,10 +191,21 @@ def prewarm_rest():
 
             print(f"    Warming REST playlist: '{pname}' ({child_count} tracks)...")
 
-            # 1) Feishin items endpoint
+            # 1a) Feishin items endpoint (full playlist)
             url_1 = f"{CACHE_BASE}/playlists/{pid}/items?{FEISHIN_FIELDS}&IncludeItemTypes=Audio&UserId={uid}"
             c1, st1, t1, _ = http_get(url_1, headers={"Authorization": AUTH_HEADER, "X-Warmup": "1"})
             print(f"      [Feishin items: {st1}] HTTP {c1} in {t1:.2f}s")
+
+            # 1b) Feishin paginated items (first screen: 0..200)
+            url_1b = f"{CACHE_BASE}/playlists/{pid}/items?{FEISHIN_FIELDS}&IncludeItemTypes=Audio&UserId={uid}&Limit=200&StartIndex=0"
+            c1b, st1b, t1b, _ = http_get(url_1b, headers={"Authorization": AUTH_HEADER, "X-Warmup": "1"})
+            print(f"      [Feishin items (0..200): {st1b}] HTTP {c1b} in {t1b:.2f}s")
+
+            # 1c) If playlist > 200 items, pre-warm second chunk (200..400) for fast scrolling
+            if child_count > 200:
+                url_1c = f"{CACHE_BASE}/playlists/{pid}/items?{FEISHIN_FIELDS}&IncludeItemTypes=Audio&UserId={uid}&Limit=200&StartIndex=200"
+                c1c, st1c, t1c, _ = http_get(url_1c, headers={"Authorization": AUTH_HEADER, "X-Warmup": "1"})
+                print(f"      [Feishin items (200..400): {st1c}] HTTP {c1c} in {t1c:.2f}s")
 
             # 2) Feishin metadata endpoint
             url_2 = f"{CACHE_BASE}/users/{uid}/items/{pid}?{FEISHIN_FIELDS}&Ids={pid}"
