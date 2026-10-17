@@ -45,6 +45,11 @@ If your music library is mounted from an exFAT, NTFS, or SMB drive, filesystem p
 - The song silently disappears from the playlist in Jellyfin and all connected players (WiiM, Feishin, Web).
 - **Solution**: Use [`tools/fix-m3u-case.py`](tools/fix-m3u-case.py) to automatically synchronize M3U playlist file paths with the canonical database casing stored in Jellyfin's `jellyfin.db`.
 
+### 6. Upstream Compression & Chunked Transfer in Cache (Accept-Encoding Poisoning)
+When caching proxies forward client `Accept-Encoding: br, gzip` to backends like Kestrel, the backend may return compressed chunks (`Transfer-Encoding: chunked`, `Content-Encoding: br`).
+- Storing these in static cache causes clients without Brotli or with strict chunk parsers to receive binary garbled responses or hang.
+- **Solution**: Nginx strips `Accept-Encoding` upstream (`proxy_set_header Accept-Encoding "";`) so clean, uncompressed JSON is cached, and Nginx's native compression compresses dynamically on the fly per client capabilities.
+
 ---
 
 ## 📁 Repository Structure
@@ -94,6 +99,7 @@ flowchart LR
 - **Endpoints Cached**:
   - `/playlists/{id}/items` (Feishin)
   - `/users/{uid}/items/{id}` (Feishin metadata)
+  - `/items/{id}?userId=...` (Alternative single item / playlist metadata)
   - `/items?ParentId=...` (Finamp)
   - `/users/{uid}/items?ParentId=...` (Jellyfin Web & generic clients)
   - `/artists`, `/artists/albumartists`, `/musicgenres`
